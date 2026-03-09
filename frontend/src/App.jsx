@@ -26,6 +26,20 @@ const fmt = (date, time) => {
 };
 
 const isUpcoming = (date, time) => new Date(`${date}T${time}`) >= new Date();
+const ONGOING_WINDOW_MS = 60 * 60 * 1000;
+
+function CategoryLegend({ categories }) {
+  return (
+    <div style={styles.legendBar}>
+      {Object.entries(categories).map(([key, cat]) => (
+        <div key={key} style={styles.legendItem}>
+          <span style={{ ...styles.legendSwatch, background: cat.color }} />
+          <span style={styles.legendLabel}>{cat.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function App() {
   const [events, setEvents] = useState([]);
@@ -63,8 +77,62 @@ export default function App() {
     setEvents(events.map((e) => (e.id === id ? { ...e, notify: !e.notify } : e)));
   };
 
+  const handleExport = () => {
+    const json = JSON.stringify(events, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "events.json";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleClearAll = async () => {
+    if (events.length === 0) return;
+    const confirmed = window.confirm("Delete all events? This cannot be undone.");
+    if (!confirmed) return;
+    await Promise.all(events.map((event) => api.deleteEvent(event.id)));
+    setEvents([]);
+    showToast("All events cleared", "info");
+  };
+
+  const handleCopy = async (event) => {
+    const cat = CATEGORIES[event.category] || CATEGORIES.other;
+    const details = [
+      `Title: ${event.title}`,
+      `Category: ${cat.label}`,
+      `Date: ${event.date}`,
+      `Time: ${event.time}`,
+      `Note: ${event.note || "-"}`,
+    ].join("\n");
+    try {
+      await navigator.clipboard.writeText(details);
+      showToast("Event copied", "info");
+    } catch {
+      alert("Event copied");
+    }
+  };
+
   const visible = events.filter((e) => filter === "all" || e.category === filter);
   const upcomingCount = events.filter((e) => isUpcoming(e.date, e.time)).length;
+  const now = Date.now();
+  const ongoingCount = events.filter((e) => {
+    const eventTime = new Date(`${e.date}T${e.time}`).getTime();
+    return eventTime <= now && now - eventTime < ONGOING_WINDOW_MS;
+  }).length;
+  const completedCount = events.filter((e) => {
+    const eventTime = new Date(`${e.date}T${e.time}`).getTime();
+    return now - eventTime >= ONGOING_WINDOW_MS;
+  }).length;
+  const analytics = [
+    { label: "total", value: events.length },
+    { label: "upcoming", value: upcomingCount },
+    { label: "ongoing", value: ongoingCount },
+    { label: "completed", value: completedCount },
+  ];
 
   return (
     <div style={styles.root}>
@@ -72,10 +140,24 @@ export default function App() {
       <header style={styles.header}>
         <div>
           <div style={styles.logo}>notifi</div>
+          <div style={styles.eventCountBadge}>{events.length} total event{events.length !== 1 ? "s" : ""}</div>
           <div style={styles.subhead}>{upcomingCount} upcoming event{upcomingCount !== 1 ? "s" : ""}</div>
         </div>
-        <button style={styles.addBtn} onClick={() => setAdding(true)}>+ add event</button>
+        <div style={styles.headerActions}>
+          <button style={styles.exportBtn} onClick={handleExport}>export events</button>
+          <button style={styles.clearBtn} onClick={handleClearAll} disabled={events.length === 0}>clear all</button>
+          <button style={styles.addBtn} onClick={() => setAdding(true)}>+ add event</button>
+        </div>
       </header>
+
+      <div style={styles.analyticsBar}>
+        {analytics.map((stat) => (
+          <div key={stat.label} style={styles.analyticsItem}>
+            <span style={styles.analyticsValue}>{stat.value}</span>
+            <span style={styles.analyticsLabel}>{stat.label}</span>
+          </div>
+        ))}
+      </div>
 
       <div style={styles.filterBar}>
         {["all", ...Object.keys(CATEGORIES)].map((cat) => (
@@ -85,9 +167,28 @@ export default function App() {
         ))}
       </div>
 
+      <CategoryLegend categories={CATEGORIES} />
+
       <main style={styles.main}>
         {visible.length === 0 && (
-          <div style={styles.empty}>no events here · <span style={styles.emptyLink} onClick={() => setAdding(true)}>add one?</span></div>
+          <div style={styles.emptyCard}>
+            <div style={styles.emptyTitle}>No events yet</div>
+            <div style={styles.emptyText}>Try starting with one of these ideas.</div>
+            <div style={styles.suggestRow}>
+              {["Meeting", "Study session", "Workout"].map((idea) => (
+                <button
+                  key={idea}
+                  style={styles.suggestChip}
+                  onClick={() => {
+                    setForm({ ...BLANK_FORM, title: idea });
+                    setAdding(true);
+                  }}
+                >
+                  {idea}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
         {visible.map((e) => {
           const cat = CATEGORIES[e.category] || CATEGORIES.other;
@@ -99,10 +200,13 @@ export default function App() {
                 <div style={styles.cardTop}>
                   <span style={styles.cardTitle}>{e.title}</span>
                   <div style={styles.cardActions}>
-                    <button title={e.notify ? "On" : "Off"} style={{ ...styles.iconBtn, color: e.notify ? cat.color : "#555" }} onClick={() => handleToggle(e.id)}>
+                    <button title="Toggle notification" style={{ ...styles.iconBtn, color: e.notify ? cat.color : "#555" }} onClick={() => handleToggle(e.id)}>
                       {e.notify ? "🔔" : "🔕"}
                     </button>
-                    <button style={{ ...styles.iconBtn, color: "#777" }} onClick={() => handleDelete(e.id, e.title)}>×</button>
+                    <button title="Copy event details" style={{ ...styles.iconBtn, color: "#8a8a8a" }} onClick={() => handleCopy(e)}>
+                      📋
+                    </button>
+                    <button title="Delete event" style={{ ...styles.iconBtn, color: "#777" }} onClick={() => handleDelete(e.id, e.title)}>×</button>
                   </div>
                 </div>
                 <div style={styles.cardMeta}>
@@ -169,14 +273,29 @@ const styles = {
   grain: { position: "fixed", inset: 0, backgroundImage: "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E\")", pointerEvents: "none", zIndex: 0 },
   header: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "2rem 2rem 1rem", position: "relative", zIndex: 1 },
   logo: { fontSize: "1.8rem", fontWeight: "700", letterSpacing: "-0.05em", color: "#fff" },
+  eventCountBadge: { display: "inline-flex", marginTop: "0.35rem", padding: "0.18rem 0.5rem", borderRadius: "999px", border: "1px solid #2a2a2a", background: "#141414", color: "#8c8c8c", fontSize: "0.68rem", letterSpacing: "0.04em" },
   subhead: { fontSize: "0.75rem", color: "#555", marginTop: "0.15rem", letterSpacing: "0.05em" },
+  headerActions: { display: "flex", gap: "0.5rem", alignItems: "center" },
+  exportBtn: { background: "transparent", color: "#b7b7b7", border: "1px solid #2a2a2a", borderRadius: "6px", padding: "0.5rem 0.85rem", fontSize: "0.74rem", fontFamily: "inherit", fontWeight: "600", cursor: "pointer", textTransform: "lowercase" },
+  clearBtn: { background: "transparent", color: "#b78181", border: "1px solid #3a2525", borderRadius: "6px", padding: "0.5rem 0.75rem", fontSize: "0.74rem", fontFamily: "inherit", fontWeight: "600", cursor: "pointer", textTransform: "lowercase" },
   addBtn: { background: "#fff", color: "#0e0e0e", border: "none", borderRadius: "6px", padding: "0.5rem 1.1rem", fontSize: "0.8rem", fontFamily: "inherit", fontWeight: "600", cursor: "pointer" },
+  analyticsBar: { display: "flex", gap: "0.5rem", padding: "0 2rem 1.25rem", position: "relative", zIndex: 1, overflowX: "auto" },
+  analyticsItem: { flex: "1 1 0", minWidth: "115px", background: "#141414", border: "1px solid #222", borderRadius: "8px", padding: "0.55rem 0.7rem", display: "flex", alignItems: "baseline", justifyContent: "space-between" },
+  analyticsValue: { fontSize: "1rem", fontWeight: "700", color: "#f0f0f0" },
+  analyticsLabel: { fontSize: "0.68rem", color: "#666", letterSpacing: "0.08em", textTransform: "uppercase" },
   filterBar: { display: "flex", gap: "0.5rem", padding: "0 2rem 1.25rem", flexWrap: "wrap", position: "relative", zIndex: 1 },
+  legendBar: { display: "flex", gap: "0.75rem", padding: "0 2rem 1rem", flexWrap: "wrap", position: "relative", zIndex: 1 },
+  legendItem: { display: "inline-flex", alignItems: "center", gap: "0.4rem", padding: "0.25rem 0.45rem", border: "1px solid #232323", borderRadius: "6px", background: "#121212" },
+  legendSwatch: { width: "8px", height: "8px", borderRadius: "999px", display: "inline-block" },
+  legendLabel: { fontSize: "0.68rem", color: "#9a9a9a", letterSpacing: "0.04em", textTransform: "uppercase" },
   filterChip: { background: "transparent", border: "1px solid #2a2a2a", color: "#555", borderRadius: "100px", padding: "0.3rem 0.85rem", fontSize: "0.72rem", fontFamily: "inherit", cursor: "pointer", transition: "all 0.15s" },
   filterActive: { background: "#1a1a1a", border: "1px solid #444", color: "#e8e8e8" },
   main: { padding: "0 2rem 4rem", display: "flex", flexDirection: "column", gap: "0.6rem", position: "relative", zIndex: 1, maxWidth: "700px", margin: "0 auto" },
-  empty: { color: "#444", fontSize: "0.85rem", textAlign: "center", paddingTop: "3rem" },
-  emptyLink: { color: "#777", cursor: "pointer", textDecoration: "underline" },
+  emptyCard: { background: "#141414", border: "1px solid #222", borderRadius: "10px", padding: "1.1rem", textAlign: "center", marginTop: "1rem" },
+  emptyTitle: { color: "#f0f0f0", fontSize: "0.92rem", fontWeight: "600" },
+  emptyText: { color: "#666", fontSize: "0.78rem", marginTop: "0.3rem" },
+  suggestRow: { display: "flex", justifyContent: "center", gap: "0.45rem", marginTop: "0.85rem", flexWrap: "wrap" },
+  suggestChip: { background: "#0f0f0f", color: "#b0b0b0", border: "1px solid #2a2a2a", borderRadius: "999px", padding: "0.3rem 0.7rem", fontSize: "0.72rem", fontFamily: "inherit", cursor: "pointer" },
   card: { display: "flex", background: "#141414", border: "1px solid #1f1f1f", borderRadius: "10px", overflow: "hidden" },
   cardAccent: { width: "3px", flexShrink: 0 },
   cardBody: { padding: "0.85rem 1rem", flex: 1, minWidth: 0 },
