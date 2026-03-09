@@ -15,6 +15,9 @@ const CATEGORIES = {
   health:  { label: "Health",  color: "#10B981" },
   social:  { label: "Social",  color: "#F59E0B" },
   finance: { label: "Finance", color: "#8B5CF6" },
+  study:   { label: "Study",   color: "#EC4899" },
+  travel:  { label: "Travel",  color: "#F97316" },
+  personal:{ label: "Personal",color: "#14B8A6" },
   other:   { label: "Other",   color: "#6B7280" },
 };
 
@@ -47,6 +50,7 @@ export default function App() {
   const [adding, setAdding] = useState(false);
   const [filter, setFilter] = useState("all");
   const [toast, setToast] = useState(null);
+  const [search, setSearch] = useState("");
   const titleRef = useRef();
 
   useEffect(() => { api.getEvents().then(setEvents); }, []);
@@ -73,6 +77,17 @@ export default function App() {
   };
 
   const handleToggle = async (id) => {
+  const toggleImportant = (id) => {
+  setEvents(events.map(e =>
+    e.id === id ? { ...e, important: !e.important } : e
+  ));
+};
+
+const toggleInterested = (id) => {
+  setEvents(events.map(e =>
+    e.id === id ? { ...e, interested: !e.interested } : e
+  ));
+};
     await api.toggleNotify(id);
     setEvents(events.map((e) => (e.id === id ? { ...e, notify: !e.notify } : e)));
   };
@@ -138,6 +153,12 @@ export default function App() {
     <div style={styles.root}>
       <div style={styles.grain} />
       <header style={styles.header}>
+      <input
+  style={{margin:"0 2rem 1rem", padding:"6px", borderRadius:"6px"}}
+  placeholder="search events..."
+  value={search}
+  onChange={(e)=>setSearch(e.target.value)}
+/>
         <div>
           <div style={styles.logo}>notifi</div>
           <div style={styles.eventCountBadge}>{events.length} total event{events.length !== 1 ? "s" : ""}</div>
@@ -212,6 +233,9 @@ export default function App() {
                 <div style={styles.cardMeta}>
                   <span style={{ ...styles.badge, background: cat.color + "22", color: cat.color }}>{cat.label}</span>
                   <span style={styles.cardDate}>{fmt(e.date, e.time)}</span>
+                  <span style={{fontSize:"0.7rem", color:"#888"}}>
+  {getStatus(e.date, e.time)}
+</span>
                 </div>
                 {e.note && <div style={styles.cardNote}>{e.note}</div>}
               </div>
@@ -253,6 +277,8 @@ export default function App() {
             </label>
             <div style={styles.modalActions}>
               <button style={styles.cancelBtn} onClick={() => { setAdding(false); setForm(BLANK_FORM); }}>cancel</button>
+              <button style={styles.iconBtn} onClick={() => toggleImportant(e.id)}>⭐</button>
+<button style={styles.iconBtn} onClick={() => toggleInterested(e.id)}>❤️</button>
               <button style={styles.saveBtn} onClick={handleAdd}>save event</button>
             </div>
           </div>
